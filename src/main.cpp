@@ -1,14 +1,20 @@
-// ImGui - standalone example application for SDL2 + OpenGL
-// If you are new to ImGui, see examples/README.txt and documentation at the top of imgui.cpp.
-
 #include <imgui.h>
 #include "imgui_impl_sdl_gl3.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <math.h>
 #include <GL/gl3w.h>
 #include <SDL.h>
 #define WD_DEBUG
 #include <wd_common.h>
 
+/*
+  TODO(wheatdog):
+  - only support 1 input, 1 output now, need to find a way to handle multiple input and ou
+ */
+
+#define PI 3.14159265f
 #define StateMax 32
 
 struct vec2
@@ -24,13 +30,32 @@ vec2 V2(float X, float Y)
     return Result;
 }
 
+enum line_status
+{
+    LineStatus_None,
+    LineStatus_Setting,
+    LineStatus_Finish,
+};
+
+struct state;
+struct connection
+{
+    line_status LineStatus;
+    vec2 End;
+    i32 Target;
+    int Output;
+};
+
 #define StateRadius 100
 struct state
 {
     vec2 Pos;
     ImVec4 Color;
-    u32 State[2];
-    u32 Output[2];
+    bool Show;
+
+    i32 In;
+    // TODO: Right now only support 1 input, need to figure a way to handle
+    connection Connection[2];
 };
 
 struct draw_vert
@@ -93,6 +118,7 @@ void AddNewState(state *States, int *StateCount, int *StateIndex, int X, int Y)
 
     ThisState->Pos.X = X;
     ThisState->Pos.Y = Y;
+    ThisState->Color = ImColor(rand() % 128, rand() % 128, rand() % 128);
 
     return;
 }
@@ -113,14 +139,68 @@ state *InStateSquare(state *States, int StatesCount, int X, int Y)
     return 0;
 }
 
+void Generate(state *States, i32 StateCount, i32 RegCount)
+{
+    printf("%d %d %d\n", 1, 1, RegCount);
+    int RepresentCount = pow(2.0f, RegCount);
+    int InCount = 1;
+    int OutIndex = 1;
+    int InRepresentCount = pow(2.0f, InCount);
+    int TotalCount = RepresentCount*InRepresentCount;
+    for (i32 RepIndex = 0; RepIndex < RepresentCount; ++RepIndex)
+    {
+        for (int InRepresent = 0; InRepresent < InRepresentCount; ++InRepresent)
+        {
+            for (int RegIndex = 0; RegIndex < RegCount; ++RegIndex)
+            {
+                printf("%d ", (RepIndex >> (RegCount - RegIndex - 1)) & 1);
+            }
+
+            for (int InIndex = 0; InIndex < InCount; ++InIndex)
+            {
+                printf("%d ", (InRepresent >> (InCount - InIndex - 1)) & 1);
+            }
+
+            if (RepIndex >= RepresentCount)
+            {
+                for (int RegIndex = 0; RegIndex < RegCount; ++RegIndex)
+                {
+                    printf("%d ", -1);
+                }
+
+                for (int OutIndex = 0; OutIndex < OutIndex; ++OutIndex)
+                {
+                    printf("%d ", -1);
+                }
+            }
+            else
+            {
+                int Target = States[RepIndex].Connection[InRepresent].Target;
+                for (int RegIndex = 0; RegIndex < RegCount; ++RegIndex)
+                {
+                    printf("%d ", (Target >> (RegCount - RegIndex - 1)) & 1);
+                }
+
+                printf("%d ", States[RepIndex].Connection[InRepresent].Output);
+            }
+            printf("\n");
+        }
+    }
+}
+
 int main(int, char**)
 {
+    srand (time(NULL));
+
     // Setup SDL
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER) != 0)
     {
         printf("Error: %s\n", SDL_GetError());
         return -1;
     }
+
+    int WindowWidth = 1280;
+    int WindowHeight = 720;
 
     // Setup window
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
@@ -132,7 +212,7 @@ int main(int, char**)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
     SDL_DisplayMode current;
     SDL_GetCurrentDisplayMode(0, &current);
-    SDL_Window *window = SDL_CreateWindow("ImGui SDL2+OpenGL3 example", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_OPENGL);//|SDL_WINDOW_RESIZABLE);
+    SDL_Window *window = SDL_CreateWindow("ImGui SDL2+OpenGL3 example", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WindowWidth, WindowHeight, SDL_WINDOW_OPENGL);//|SDL_WINDOW_RESIZABLE);
     SDL_GLContext glcontext = SDL_GL_CreateContext(window);
     gl3wInit();
 
@@ -201,39 +281,18 @@ int main(int, char**)
     glVertexAttribPointer(AttribLocationColor, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(draw_vert), (GLvoid*)OFFSETOF(draw_vert, Color));
 #undef OFFSETOF
 
-    // GLuint VertexArrayID;
-    // glGenVertexArrays(1, &VertexArrayID);
-    // glBindVertexArray(VertexArrayID);
-
     i32 StatesCount = 0;
     i32 StateIndex = 0;
+    i32 RegCount = 0;
     state States[StateMax] = {};
-
-    // static const GLfloat g_vertex_buffer_data[] = {
-    //     -1.0f, -1.0f, 0.0f,
-    //     1.0f, -1.0f, 0.0f,
-    //     0.0f,  1.0f, 0.0f,
-    // };
-    // static const GLfloat g_color_buffer_data[] = {
-    //     0.583f,  0.771f,  0.014f,
-    //     0.609f,  0.115f,  0.436f,
-    //     0.327f,  0.483f,  0.844f,
-    // };
-
-    // GLuint vertexbuffer;
-    // glGenBuffers(1, &vertexbuffer);
-    // glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
-    // glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data), g_vertex_buffer_data, GL_STATIC_DRAW);
-
-    // GLuint colorbuffer;
-    // glGenBuffers(1, &colorbuffer);
-    // glBindBuffer(GL_ARRAY_BUFFER, colorbuffer);
-    // glBufferData(GL_ARRAY_BUFFER, sizeof(g_color_buffer_data), g_color_buffer_data, GL_STATIC_DRAW);
 
     bool show_test_window = false;
     bool show_another_window = false;
-    bool show_state[StateMax] = {};
     ImVec4 clear_color = ImColor(114, 144, 154);
+
+    vec2 Origin = V2(WindowWidth / 2.0f, WindowHeight / 2.0f);
+    float Radius = 100;
+    state *SettingStates = 0;
 
     // Main loop
     bool done = false;
@@ -250,18 +309,63 @@ int main(int, char**)
 
             if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_a)
             {
+#if 0
                 int MouseX, MouseY;
                 SDL_GetMouseState(&MouseX, &MouseY);
 
                 AddNewState(States, &StatesCount, &StateIndex, MouseX, MouseY);
+#else
+                AddNewState(States, &StatesCount, &StateIndex, 0, 0);
+
+                for (int BitIndex = 0; BitIndex < 31; ++BitIndex)
+                {
+                    if (StatesCount <= (int)(pow(2.0f, BitIndex+1)))
+                    {
+                        RegCount = BitIndex + 1;
+                        break;
+                    }
+                }
+#endif
             }
 
-            if (event.button.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT)
+            if (event.button.type == SDL_MOUSEBUTTONDOWN)
             {
-                state* Inside = InStateSquare(States, StatesCount, event.button.x, event.button.y);
-                if (Inside)
+                if (event.button.button == SDL_BUTTON_LEFT)
                 {
-                    Inside->Color = ImColor(255, 255, 255);
+                    state* Inside = InStateSquare(States, StatesCount, event.button.x, event.button.y);
+                    if (Inside)
+                    {
+                        Inside->Show = true;
+                    }
+                }
+                else if (event.button.button == SDL_BUTTON_RIGHT)
+                {
+                    state* Inside = InStateSquare(States, StatesCount, event.button.x, event.button.y);
+                    if (event.button.clicks == 1 && !SettingStates)
+                    {
+                        int MouseX, MouseY;
+                        SDL_GetMouseState(&MouseX, &MouseY);
+                        if (Inside)
+                        {
+                            Inside->Connection[Inside->In].LineStatus = LineStatus_Setting;
+                            SettingStates = Inside;
+                        }
+                    }
+                    else if (event.button.clicks == 1 && SettingStates)
+                    {
+                        if (Inside)
+                        {
+                            SettingStates->Connection[SettingStates->In].LineStatus = LineStatus_Finish;
+                            SettingStates->Connection[SettingStates->In].End = Inside->Pos;
+                            SettingStates->Connection[SettingStates->In].Target = (Inside - States);
+                        }
+                        else
+                        {
+                            SettingStates->Connection[SettingStates->In].LineStatus = LineStatus_None;
+                        }
+
+                        SettingStates = 0;
+                    }
                 }
             }
         }
@@ -273,26 +377,55 @@ int main(int, char**)
         {
             ImGui::Begin("Main Window");
             ImGui::ColorEdit3("clear color", (float*)&clear_color);
+            ImGui::DragFloat("radius", &Radius, 10.0f, 100.0f, 2000.0f, "%.1f");
             if (ImGui::Button("Test Window")) show_test_window ^= 1;
             if (ImGui::Button("Another Window")) show_another_window ^= 1;
+            if (ImGui::Button("Generate")) Generate(States, StatesCount, RegCount);
             ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-            ImGui::Text("%d, %d\n", StatesCount, StateIndex);
-
-            if (ImGui::CollapsingHeader("States"))
-            {
-                for (int StateNum = 0; StateNum < StatesCount; ++StateNum)
-                {
-                    char buf[32];
-                    sprintf(buf, "state %d", StateNum);
-                    if (ImGui::CollapsingHeader(buf))
-                    {
-                        ImGui::ColorEdit3(buf, (float*)&(States[StateNum].Color));
-                    }
-                }
-            }
+            ImGui::Text("Number of states: %d\n", StatesCount);
+            ImGui::Text("%p\n", SettingStates);
+            ImGui::Text("Number of registers: %d\n", RegCount);
             ImGui::End();
         }
 
+        double Delta = 2.0f*PI / (double)StatesCount;
+        for (int StateNum = 0; StateNum < StatesCount; ++StateNum)
+        {
+            States[StateNum].Pos = V2(Origin.X + Radius*cos(StateNum*Delta), Origin.Y + Radius*sin(StateNum*Delta));
+
+            for (int InIndex = 0; InIndex < 2; ++InIndex)
+            {
+                if (States[StateNum].Connection[InIndex].LineStatus == LineStatus_Setting)
+                {
+                    States[StateNum].Connection[InIndex].End = V2(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y);
+                }
+            }
+
+            char buf[32];
+            sprintf(buf, "state %d", StateNum);
+            if (States[StateNum].Show)
+            {
+                ImGui::SetNextWindowSize(ImVec2(200,100), ImGuiSetCond_FirstUseEver);
+                ImGui::Begin(buf, &(States[StateNum].Show));
+                ImGui::ColorEdit3("color", (float*)&(States[StateNum].Color));
+                ImGui::RadioButton("0", &(States[StateNum].In), 0); ImGui::SameLine();
+                ImGui::RadioButton("1", &(States[StateNum].In), 1);
+                for (int InIndex = 0; InIndex < 2; ++InIndex)
+                {
+                    if (States[StateNum].In != InIndex) continue;
+                    ImGui::PushID(InIndex);
+                    connection *Con = &States[StateNum].Connection[InIndex];
+                    ImGui::Text("%d\n", InIndex);
+                    ImGui::BulletText("Next States: %d", Con->Target);
+                    ImGui::BulletText("Output: %d", Con->Output);
+                    ImGui::RadioButton("0", &(Con->Output), 0); ImGui::SameLine();
+                    ImGui::RadioButton("1", &(Con->Output), 1);
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::End();
+            }
+        }
         // 2. Show another simple window, this time using an explicit Begin/End pair
         if (show_another_window)
         {
@@ -343,6 +476,26 @@ int main(int, char**)
             glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)wdArrayCount(DrawData) * sizeof(draw_vert),
                          (GLvoid *)DrawData, GL_STREAM_DRAW);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, wdArrayCount(DrawData));
+
+            for (int InIndex = 0; InIndex < 2; ++InIndex)
+            {
+                if (ThisState->Connection[InIndex].LineStatus)
+                {
+                    draw_vert DrawLine[2] = {};
+                    DrawLine[0].Pos = V2(ThisState->Pos.X, ThisState->Pos.Y);
+                    DrawLine[1].Pos = V2(ThisState->Connection[InIndex].End.X, ThisState->Connection[InIndex].End.Y);
+
+                    for (int VertexIndex = 0; VertexIndex < 2; ++VertexIndex)
+                    {
+                        DrawLine[VertexIndex].Color = ColorToU32(ThisState->Color);
+                    }
+
+                    glBindBuffer(GL_ARRAY_BUFFER, VBOHandle);
+                    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)wdArrayCount(DrawLine) * sizeof(draw_vert),
+                                 (GLvoid *)DrawLine, GL_STREAM_DRAW);
+                    glDrawArrays(GL_LINES, 0, wdArrayCount(DrawLine));
+                }
+            }
         }
 
         ImGui::Render();
