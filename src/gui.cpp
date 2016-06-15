@@ -6,16 +6,22 @@
 #include <math.h>
 #include <GL/gl3w.h>
 #include <SDL.h>
-#define WD_DEBUG
-#include <wd_common.h>
+// #define WD_DEBUG
+#include "wd_common.h"
+#include "state.cpp"
 
+#define IM_ARRAYSIZE(_ARR)  ((int)(sizeof(_ARR)/sizeof(*_ARR)))
 /*
   TODO(wheatdog):
   - only support 1 input, 1 output now, need to find a way to handle multiple input and ou
  */
 
 #define PI 3.14159265f
-#define StateMax 32
+#define STATE_MAX 32
+#define REG_MAX 5
+
+const char* Global_RegTypes[] = { "SR", "JK", "T", "D" };
+float Global_StateRadius = 100.0f;
 
 struct vec2
 {
@@ -46,7 +52,6 @@ struct connection
     int Output;
 };
 
-#define StateRadius 100
 struct state
 {
     vec2 Pos;
@@ -111,10 +116,10 @@ void CheckShaderCompile(GLuint Handle)
 
 void AddNewState(state *States, int *StateCount, int *StateIndex, int X, int Y)
 {
-    state *ThisState = States + (*StateIndex)%StateMax;
-    (*StateIndex) = (*StateIndex + 1) % StateMax;
+    state *ThisState = States + (*StateIndex)%STATE_MAX;
+    (*StateIndex) = (*StateIndex + 1) % STATE_MAX;
 
-    if (*StateCount < StateMax) (*StateCount)++;
+    if (*StateCount < STATE_MAX) (*StateCount)++;
 
     ThisState->Pos.X = X;
     ThisState->Pos.Y = Y;
@@ -128,10 +133,10 @@ state *InStateSquare(state *States, int StatesCount, int X, int Y)
     for (int Index = 0; Index < StatesCount; ++Index)
     {
         state *ThisState = States + Index;
-        if ((X < (ThisState->Pos.X + 0.5*StateRadius)) &&
-            (X >= (ThisState->Pos.X - 0.5*StateRadius)) &&
-            (Y < (ThisState->Pos.Y + 0.5*StateRadius)) &&
-            (Y >= (ThisState->Pos.Y - 0.5*StateRadius)))
+        if ((X < (ThisState->Pos.X + 0.5*Global_StateRadius)) &&
+            (X >= (ThisState->Pos.X - 0.5*Global_StateRadius)) &&
+            (Y < (ThisState->Pos.Y + 0.5*Global_StateRadius)) &&
+            (Y >= (ThisState->Pos.Y - 0.5*Global_StateRadius)))
         {
             return ThisState;
         }
@@ -139,53 +144,70 @@ state *InStateSquare(state *States, int StatesCount, int X, int Y)
     return 0;
 }
 
-void Generate(state *States, i32 StateCount, i32 RegCount)
+void Generate(state *States, i32 StateCount, i32 RegCount, int *RegType)
 {
-    printf("%d %d %d\n", 1, 1, RegCount);
-    int RepresentCount = pow(2.0f, RegCount);
-    int InCount = 1;
-    int OutIndex = 1;
-    int InRepresentCount = pow(2.0f, InCount);
-    int TotalCount = RepresentCount*InRepresentCount;
-    for (i32 RepIndex = 0; RepIndex < RepresentCount; ++RepIndex)
+    state_table_info StateTableInfo = {};
+    StateTableInfo.InCount = 1;
+    StateTableInfo.OutCount = 1;
+    StateTableInfo.RegCount = RegCount;
+
+    StateTableInfo.VariableCount = StateTableInfo.InCount + StateTableInfo.RegCount;
+    StateTableInfo.RowMax = (int)pow(2.0f, (float)StateTableInfo.VariableCount);
+    StateTableInfo.ColMax = StateTableInfo.InCount + 2*StateTableInfo.RegCount + StateTableInfo.OutCount;
+    StateTableInfo.StateTable = (int **)malloc(StateTableInfo.RowMax*sizeof(int *));
+    for (int Row = 0; Row < StateTableInfo.RowMax; ++Row)
     {
-        for (int InRepresent = 0; InRepresent < InRepresentCount; ++InRepresent)
+        StateTableInfo.StateTable[Row] = (int *)malloc(StateTableInfo.ColMax*sizeof(int));
+    }
+
+    for (i32 Row = 0; Row < StateTableInfo.RowMax; ++Row)
+    {
+        int ThisStateNumber = (Row >> StateTableInfo.InCount);
+        int ThisInput = Row ^ (ThisStateNumber << StateTableInfo.InCount);
+        int NextStateNumber = States[ThisStateNumber].Connection[ThisInput].Target;
+        int Output = States[ThisStateNumber].Connection[ThisInput].Target;
+
+        int Combine = ((ThisStateNumber << (StateTableInfo.OutCount + StateTableInfo.RegCount + StateTableInfo.InCount)) |
+                       (ThisInput << (StateTableInfo.OutCount + StateTableInfo.RegCount)) |
+                       (NextStateNumber << StateTableInfo.OutCount) |
+                       (Output));
+        for (i32 Col = 0; Col < StateTableInfo.ColMax; ++Col)
         {
-            for (int RegIndex = 0; RegIndex < RegCount; ++RegIndex)
-            {
-                printf("%d ", (RepIndex >> (RegCount - RegIndex - 1)) & 1);
-            }
-
-            for (int InIndex = 0; InIndex < InCount; ++InIndex)
-            {
-                printf("%d ", (InRepresent >> (InCount - InIndex - 1)) & 1);
-            }
-
-            if (RepIndex >= RepresentCount)
-            {
-                for (int RegIndex = 0; RegIndex < RegCount; ++RegIndex)
-                {
-                    printf("%d ", -1);
-                }
-
-                for (int OutIndex = 0; OutIndex < OutIndex; ++OutIndex)
-                {
-                    printf("%d ", -1);
-                }
-            }
-            else
-            {
-                int Target = States[RepIndex].Connection[InRepresent].Target;
-                for (int RegIndex = 0; RegIndex < RegCount; ++RegIndex)
-                {
-                    printf("%d ", (Target >> (RegCount - RegIndex - 1)) & 1);
-                }
-
-                printf("%d ", States[RepIndex].Connection[InRepresent].Output);
-            }
-            printf("\n");
+            int Result = (Combine >> (StateTableInfo.ColMax - Col - 1)) & 1;
+            StateTableInfo.StateTable[Row][Col] = Result;
         }
     }
+
+    StateTableInfo.RegInfo = (reg_info *)malloc(StateTableInfo.RegCount*sizeof(reg_info));
+    for (int RegIndex = 0; RegIndex < RegCount; ++RegIndex)
+    {
+        switch(Global_RegTypes[RegType[RegIndex]][0])
+        {
+        case 'S':
+            StateTableInfo.RegInfo[RegIndex].RegType = REG_SR;
+            StateTableInfo.RegInfo[RegIndex].InputCount = 2;
+            break;
+        case 'J':
+            StateTableInfo.RegInfo[RegIndex].RegType = REG_JK;
+            StateTableInfo.RegInfo[RegIndex].InputCount = 2;
+            break;
+        case 'T':
+            StateTableInfo.RegInfo[RegIndex].RegType = REG_T;
+            StateTableInfo.RegInfo[RegIndex].InputCount = 1;
+            break;
+        case 'D':
+            StateTableInfo.RegInfo[RegIndex].RegType = REG_D;
+            StateTableInfo.RegInfo[RegIndex].InputCount = 1;
+            break;
+        default:
+            assert(!"Stange things happened, or you enter now allowed input!");
+        }
+    }
+
+    StateTableInfo.Output = (input *)malloc(StateTableInfo.OutCount*sizeof(input));
+
+    SolveTable(&StateTableInfo);
+
 }
 
 int main(int, char**)
@@ -284,14 +306,15 @@ int main(int, char**)
     i32 StatesCount = 0;
     i32 StateIndex = 0;
     i32 RegCount = 0;
-    state States[StateMax] = {};
+    i32 RegType[REG_MAX];
+    state States[STATE_MAX] = {};
 
     bool show_test_window = false;
     bool show_another_window = false;
     ImVec4 clear_color = ImColor(114, 144, 154);
 
     vec2 Origin = V2(WindowWidth / 2.0f, WindowHeight / 2.0f);
-    float Radius = 100;
+    float Radius = 100.0f;
     state *SettingStates = 0;
 
     // Main loop
@@ -378,13 +401,22 @@ int main(int, char**)
             ImGui::Begin("Main Window");
             ImGui::ColorEdit3("clear color", (float*)&clear_color);
             ImGui::DragFloat("radius", &Radius, 10.0f, 100.0f, 2000.0f, "%.1f");
+            ImGui::DragFloat("state box radius", &Global_StateRadius, 10.0f, 30.0f, 100.0f, "%.1f");
             if (ImGui::Button("Test Window")) show_test_window ^= 1;
             if (ImGui::Button("Another Window")) show_another_window ^= 1;
-            if (ImGui::Button("Generate")) Generate(States, StatesCount, RegCount);
+            if (ImGui::Button("Generate")) Generate(States, StatesCount, RegCount, RegType);
             ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
             ImGui::Text("Number of states: %d\n", StatesCount);
             ImGui::Text("%p\n", SettingStates);
             ImGui::Text("Number of registers: %d\n", RegCount);
+            for (int RegIndex = 0; RegIndex < RegCount; ++RegIndex)
+            {
+                char RegNameBuf[32];
+                sprintf(RegNameBuf, "Q[%d]", RegIndex);
+                ImGui::PushID(RegIndex);
+                ImGui::Combo(RegNameBuf, RegType + RegIndex, Global_RegTypes, IM_ARRAYSIZE(Global_RegTypes));
+                ImGui::PopID();
+            }
             ImGui::End();
         }
 
@@ -395,9 +427,14 @@ int main(int, char**)
 
             for (int InIndex = 0; InIndex < 2; ++InIndex)
             {
+                connection *Con = &States[StateNum].Connection[InIndex];
                 if (States[StateNum].Connection[InIndex].LineStatus == LineStatus_Setting)
                 {
-                    States[StateNum].Connection[InIndex].End = V2(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y);
+                    Con->End = V2(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y);
+                }
+                else if (States[StateNum].Connection[InIndex].LineStatus == LineStatus_Finish)
+                {
+                    Con->End = States[Con->Target].Pos;
                 }
             }
 
@@ -413,8 +450,8 @@ int main(int, char**)
                 for (int InIndex = 0; InIndex < 2; ++InIndex)
                 {
                     if (States[StateNum].In != InIndex) continue;
-                    ImGui::PushID(InIndex);
                     connection *Con = &States[StateNum].Connection[InIndex];
+                    ImGui::PushID(InIndex);
                     ImGui::Text("%d\n", InIndex);
                     ImGui::BulletText("Next States: %d", Con->Target);
                     ImGui::BulletText("Output: %d", Con->Output);
@@ -462,10 +499,10 @@ int main(int, char**)
         {
             state *ThisState = States + StateNum;
             draw_vert DrawData[4] = {};
-            DrawData[0].Pos = V2(ThisState->Pos.X - 0.5f*StateRadius, ThisState->Pos.Y - 0.5f*StateRadius);
-            DrawData[1].Pos = V2(ThisState->Pos.X + 0.5f*StateRadius, ThisState->Pos.Y - 0.5f*StateRadius);
-            DrawData[2].Pos = V2(ThisState->Pos.X - 0.5f*StateRadius, ThisState->Pos.Y + 0.5f*StateRadius);
-            DrawData[3].Pos = V2(ThisState->Pos.X + 0.5f*StateRadius, ThisState->Pos.Y + 0.5f*StateRadius);
+            DrawData[0].Pos = V2(ThisState->Pos.X - 0.5f*Global_StateRadius, ThisState->Pos.Y - 0.5f*Global_StateRadius);
+            DrawData[1].Pos = V2(ThisState->Pos.X + 0.5f*Global_StateRadius, ThisState->Pos.Y - 0.5f*Global_StateRadius);
+            DrawData[2].Pos = V2(ThisState->Pos.X - 0.5f*Global_StateRadius, ThisState->Pos.Y + 0.5f*Global_StateRadius);
+            DrawData[3].Pos = V2(ThisState->Pos.X + 0.5f*Global_StateRadius, ThisState->Pos.Y + 0.5f*Global_StateRadius);
 
             for (int VertexIndex = 0; VertexIndex < 4; ++VertexIndex)
             {
