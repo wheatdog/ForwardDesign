@@ -165,7 +165,7 @@ void Generate(state *States, i32 StateCount, i32 RegCount, int *RegType)
         int ThisStateNumber = (Row >> StateTableInfo.InCount);
         int ThisInput = Row ^ (ThisStateNumber << StateTableInfo.InCount);
         int NextStateNumber = States[ThisStateNumber].Connection[ThisInput].Target;
-        int Output = States[ThisStateNumber].Connection[ThisInput].Target;
+        int Output = States[ThisStateNumber].Connection[ThisInput].Output;
 
         int Combine = ((ThisStateNumber << (StateTableInfo.OutCount + StateTableInfo.RegCount + StateTableInfo.InCount)) |
                        (ThisInput << (StateTableInfo.OutCount + StateTableInfo.RegCount)) |
@@ -205,6 +205,15 @@ void Generate(state *States, i32 StateCount, i32 RegCount, int *RegType)
     }
 
     StateTableInfo.Output = (input *)malloc(StateTableInfo.OutCount*sizeof(input));
+
+    for (i32 Row = 0; Row < StateTableInfo.RowMax; ++Row)
+    {
+        for (i32 Col = 0; Col < StateTableInfo.ColMax; ++Col)
+        {
+            printf("%d ", StateTableInfo.StateTable[Row][Col]);
+        }
+        printf("\n");
+    }
 
     SolveTable(&StateTableInfo);
 
@@ -453,10 +462,9 @@ int main(int, char**)
                     connection *Con = &States[StateNum].Connection[InIndex];
                     ImGui::PushID(InIndex);
                     ImGui::Text("%d\n", InIndex);
-                    ImGui::BulletText("Next States: %d", Con->Target);
-                    ImGui::BulletText("Output: %d", Con->Output);
-                    ImGui::RadioButton("0", &(Con->Output), 0); ImGui::SameLine();
-                    ImGui::RadioButton("1", &(Con->Output), 1);
+                    if (ImGui::InputInt("Next States", &Con->Target))
+                        Con->LineStatus = LineStatus_Finish;
+                    ImGui::InputInt("Output", &Con->Output);
                     ImGui::PopID();
                     break;
                 }
